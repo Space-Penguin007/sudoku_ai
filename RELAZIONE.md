@@ -1,82 +1,66 @@
-# Relazione tecnica — AI Sudoku Vision & Tutor
+# AI Sudoku Vision & Tutor — Relazione tecnica
 
-**Consegna:** Google Classroom · **Modalità:** individuale/gruppo max 3 · **SDK:** Flutter + Android SDK · **API:** Google Gemini
+**Versione stampabile (2 pagine A4):** [RELAZIONE.pdf](RELAZIONE.pdf) · **Repo:** [sudoku_ai](https://github.com/Space-Penguin007/sudoku_ai) · **APK:** [GitHub Release v1.0](https://github.com/Space-Penguin007/sudoku_ai/releases/latest)
+
+Consegna: Google Classroom · SDK: Flutter + Android SDK · API: Google Gemini · Backend: Supabase Edge Function
 
 ## 1. Obiettivo
 
-Realizzare un'applicazione Android installabile (APK) che acquisisca una foto di un Sudoku cartaceo incompleto, ne estragga la matrice 9×9 tramite Gemini e fornisca supporto guidato: correzione manuale, suggerimento della mossa più semplice con spiegazione logica, hint progressivi e risoluzione completa.
-
-![Mockup interfaccia](docs/mockup-ui.svg)
-
-*Figura 1 — Schema dell'interfaccia: acquisizione, griglia editabile, tutor e controlli.*
+App Android installabile che fotografa un Sudoku cartaceo incompleto, digitalizza la matrice 9×9 tramite Gemini, consente la correzione manuale e offre un tutor logico in italiano (suggerimento spiegato, hint progressivi, risoluzione completa). Complementano l'esperienza 8 livelli didattici e 6 lezioni guidate, giocabili anche offline.
 
 ## 2. Architettura scelta
 
-L'app è un client Flutter che parla con una **Supabase Edge Function** (`gemini-proxy`): è l'unico componente a conoscere la chiave API, custodita nei Supabase Secrets (`GEMINI_API_KEY`, mai nell'APK e mai distribuita in `.env`). Lo stesso progetto Supabase fornisce account e sincronizzazione. Il flusso è:
+`Foto → Flutter → Supabase Edge Function (gemini-proxy) → Gemini API`.
 
-1. **Acquisizione**: `image_picker` apre fotocamera o galleria; l'immagine viene codificata in base64.
-2. **OCR**: `POST /api/ocr` invia immagine e prompt a Gemini con *Structured Outputs* (`responseMimeType: application/json` + `responseSchema`). La Edge Function valida che la risposta sia una matrice 9×9 di interi 0–9. Se funzione/rete/chiave non sono disponibili, il client esegue un OCR locale con Tesseract: rileva le 10 linee della griglia, ritaglia le sole celle con inchiostro, ricostruisce ogni cifra su sfondo bianco e valida la matrice con il solutore. Il modello `eng.traineddata` (3,9 MB) è incluso negli asset dell'APK.
-3. **Verifica**: la griglia viene renderizzata in 81 `TextField`; le celle riconosciute sono blu e l'utente può correggerle. I conflitti (duplicati su riga/colonna/blocco) diventano rossi.
-4. **Tutor**: `POST /api/explain` chiede a Gemini una spiegazione in italiano; se API o rete mancano, il client genera comunque una spiegazione regola-based.
-5. **Risoluzione**: un backtracking esatto in Dart (e lo speculare modulo TypeScript nella Edge Function) completa la griglia e colora di verde le celle aggiunte dall'AI.
-6. **Sync (opzionale)**: Supabase Auth con magic link (deep link `it.sudokuvision.app://login-callback`, flusso PKCE) o email/password; un'unica tabella `player_progress` con RLS memorizza progressi e impostamenti JSON per utente. La chiave anon è pubblica, quella `service_role` non è mai inclusa.
+La chiave Gemini (`GEMINI_API_KEY`) risiede **solo nei Supabase Secrets**: non è nell'APK e non è in `.env`. L'app invia la publishable key come header `apikey` / `Bearer`; URL e chiave sono iniettati a build time con `--dart-define`. Supabase fornisce anche Auth (magic link PKCE o email/password) e il sync dei progressi con Row Level Security. La `service_role` non è mai inclusa.
+
+1. **Acquisizione** — `image_picker` da fotocamera o galleria, immagine in base64.
+2. **OCR** — `POST /api/ocr` con Structured Outputs; validazione di una matrice 9×9 di interi 0–9. Se rete/funzione/chiave mancano, scatta l'OCR locale Tesseract (modello `eng` incluso, soglia di Otsu) validato dal solutore.
+3. **Verifica** — griglia 9×9 editabile, cifre lette in blu, conflitti rossi, separatori neri tra i blocchi 3×3.
+4. **Tutor** — `POST /api/explain` per la spiegazione in italiano; offline vengono usate regole locali.
+5. **Risoluzione** — backtracking esatto con MRV in Dart e TypeScript: Gemini non calcola mai i numeri.
+6. **Sync** — tabella `player_progress` con RLS per utente; nessuna UI di configurazione esposta all'utente.
 
 ![Architettura](docs/architettura.svg)
+*Figura 1 — Architettura e solver ibrido.*
 
-*Figura 2 — Architettura a tre livelli e solver ibrido.*
+## 3. Integrazione API e JSON
 
-## 3. Integrazione API e gestione JSON
-
-Il modello predefinito è `gemini-3.6-flash`, con fallback automatico a `gemini-3.5-flash-lite` e `gemini-3.8-flash` in caso di picchi di richieste o disattivazione (configurabile via `GEMINI_MODEL`). Lo schema OCR richiede:
-
-```json
-{ "valid": boolean, "grid": number[9][9], "note": string }
-```
-
-Lo schema della spiegazione richiede:
-
-```json
-{ "row": 0-8, "col": 0-8, "valore": 1-9, "spiegazione": "testo italiano" }
-```
-
-La Edge Function rimuove eventuali fence Markdown, effettua il `JSON.parse`, verifica forma e valori e restituisce errori HTTP significativi (400 input non valido, 422 griglia inconsistente, 503 chiave mancante, 502 errore Gemini). L'app mostra ogni errore in snackbar e nello stato del tutor.
+Modello primario `gemini-3.6-flash`, fallback `gemini-3.5-flash-lite` e `gemini-3.8-flash`. Schema OCR: `{ valid, grid: number[9][9], note }`; schema spiegazione: `{ row, col, valore, spiegazione }`. La Edge Function rimuove le fence Markdown, esegue `JSON.parse`, valida forma e valori e restituisce errori HTTP 400/422/502/503.
 
 ## 4. Funzionalità bonus implementate
 
 | Bonus | Implementazione |
 |---|---|
-| OCR offline | Tesseract4Android con modello `eng` incluso; rilettura delle celle con soglia di Otsu locale, validazione con solver; usato in automatico se Gemini fallisce o su richiesta esplicita |
-| Solutore ibrido | Backtracking con MRV in Dart/TypeScript; Gemini usato solo per spiegare, mai per calcolo numerico |
-| Hint progressivi | 3 livelli: blocco 3x3 → cella e vincoli → numero con spiegazione |
-| Tutor vocale | `flutter_tts`, lingua `it-IT`, attivabile dall'appbar o dal pulsante "Leggi" |
-| Mascotte pinguino | Pinguino disegnato via `CustomPainter` (corpo, ali, sciarpa, becco) con stati idle, thinking, happy, error; ricorre nel tutor, nei livelli e nelle lezioni. Le 4 icone della barra inferiore sono scene dedicate: pinguino con fotocamera (Foto), pinguino davanti a un sudoku (Livelli), pinguino con occhiali e libro "SUDOKU" (Impara), pinguino con scatola "DATI" (Profilo) |
-| Interfaccia Duolingo-style | Tema condiviso (`duo_theme.dart`): palette verde/blu/giallo, pulsanti con ombra inferiore "3D", card arrotondate, griglia a celle arrotondate, **linee nere spesse tra i blocchi 3x3** e cornice esterna, percorso livelli con pinguini |
-| Overlay AR lite | Canvas che sovrappone i numeri mancanti alla foto acquisita |
-| Modalità Livelli | 8 puzzle con difficoltà crescente, generati con soluzione unica garantita; stelle, XP, tempi migliori e sblocchi progressivi salvati in locale. Gameplay: 3 cuori con errore immediato (numero errato rimosso e lampo rosso), evidenziazione blu di tutte le occorrenze del numero toccato, massimo 3 suggerimenti con contatore `Suggerimenti 3/3`, cascade animata "domino" delle righe/colonne/blocchi completati. **Nessuno snackbar durante il gioco**: il riscontro visivo avviene solo tramite cuori, colori e contatore. Lo stesso motore (`SudokuGameScreen`) è riutilizzato dalla pagina Foto per giocare la griglia digitalizzata (soluzione calcolata in locale, senza XP né sblocchi) |
-| Lezioni guidate | 6 passaggi interattivi (riga, colonna, blocco, 3 esercizi) per imparare le regole da zero, senza backend |
-| Account e cloud sync | Supabase Auth: magic link con deep link PKCE oppure email/password; stelle, tempi, lezioni, URL della funzione Gemini e voce uniti per il miglior risultato, protetti da Row Level Security. La UI di **Profilo** contiene solo il login: URL/chiave sono iniettati a build time con `--dart-define` e nessuna schermata di configurazione è esposta all'utente |
+| Tutor vocale | `flutter_tts` in `it-IT`, pulsante “Leggi” |
+| Avatar interattivo | Pinguino `CustomPainter` con 4 stati; icone nav dedicate |
+| Hint progressivi | Blocco → cella → numero spiegato; max 3 suggerimenti per partita |
+| Solutore ibrido | Backtracking MRV in Dart/TypeScript, Gemini solo per spiegare |
+| Overlay AR lite | Numeri mancanti sovrapposti alla foto |
+| OCR offline | Tesseract4Android con modello `eng` incluso, senza rete né API key |
+| Livelli e lezioni | 8 puzzle a soluzione unica, 3 cuori, errore immediato, cascade domino, XP/stelle; 6 lezioni interattive |
+| UI e account | Tema Duolingo-style, linee nere 3×3, griglia della foto giocabile come i Livelli, login e cloud sync RLS |
 
-## 5. Test e risultati
+## 5. Screenshot dell'app
 
-- `npm run test:server` verifica solver, rilevamento conflitti, conteggio soluzioni e conversioni.
-- `flutter test` verifica la logica Dart su puzzle noto, mosse logiche, casi non risolvibili, unicità degli 8 livelli, merge dei progressi cloud, refresh automatico degli XP dopo il sync, parsing/rilevamento griglia e soglia adattiva dell'OCR locale, griglie vuote, navigazione tra le 4 schede, assenza di UI di configurazione in Profilo, etichette dei pulsanti, blocca numeri dati/barra numeri dei Livelli, evidenziazione occorrenze, 3 cuori con rimozione del numero errato e assenza di snackbar, limite di 3 suggerimenti con contatore, cascata animata delle righe/colonne/blocchi completati, giocabilità della griglia digitalizzata dalla foto con lo stesso motore dei Livelli e invio dell'header `apikey` alla Edge Function (24 test totali).
-- `flutter build apk --release` produce `AI-Sudoku-Vision-Tutor.apk` (~75,9 MB, include modello Tesseract e librerie native per arm64-v8a/armeabi-v7a/x86_64), installabile su Android 8+ (minSdk 24). Configurazione Supabase iniettata con `--dart-define` (URL e publishable key verificati dentro `libapp.so`; la chiave Gemini resta solo nei Secrets).
+| | | | |
+|---|---|---|---|
+| <img src="screenshots/ai_solution.jpeg" width="130" alt="Griglia e soluzione"><br>Griglia / soluzione AI | <img src="screenshots/livelli.jpeg" width="130" alt="Livelli"><br>Percorso livelli | <img src="screenshots/impara.jpeg" width="130" alt="Lezioni"><br>Lezioni guidate | <img src="screenshots/profilo.jpeg" width="130" alt="Profilo"><br>Profilo e login |
 
-Gli screenshot reali dell'app sono inclusi nella cartella `screenshots/`:
+Screenshot reali da dispositivo Android (720×1444 / 720×1570 px).
 
-| File | Schermata |
-|---|---|
-| `screenshots/ai_solution.jpeg` | griglia con soluzione/risultato dell'AI |
-| `screenshots/livelli.jpeg` | percorso dei livelli |
-| `screenshots/impara.jpeg` | lezioni guidate |
-| `screenshots/profilo.jpeg` | accesso e profilo Supabase |
+## 6. Test e risultati
 
-Le immagini sono screenshot da dispositivo Android, risoluzione 720×1444 / 720×1570 px.
+- `flutter test`: **24 test superati** (solver, OCR, JSON, sync, navigazione, gameplay, griglia digitalizzata).
+- `npm run test:server`: solver, conflitti, conteggio soluzioni e conversioni.
+- `flutter build apk --release`: APK ~75,9 MB, Android 8+ (minSdk 24).
 
-## 6. Consegna
+## Consegna
 
 - [x] Codice sorgente completo (Flutter + Supabase Edge Function)
 - [x] `.env.example` senza chiave reale
-- [x] APK release `AI-Sudoku-Vision-Tutor.apk` nella cartella radice
-- [x] Relazione tecnica (questo file)
-- [x] Screenshot reali in `screenshots/` (`ai_solution.jpeg`, `livelli.jpeg`, `impara.jpeg`, `profilo.jpeg`)
+- [x] APK release nella [Release v1.0](https://github.com/Space-Penguin007/sudoku_ai/releases/latest)
+- [x] Relazione tecnica in 2 pagine: [RELAZIONE.pdf](RELAZIONE.pdf)
+- [x] Screenshot reali in `screenshots/`
+
+Il PDF si rigenera con `python scripts/generate_relazione.py`.

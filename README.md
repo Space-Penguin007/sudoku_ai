@@ -21,7 +21,8 @@ Scarica l'APK dalla [sezione Releases](../../releases/latest) (~76 MB) e install
 │   └── android/         # Manifest Android generato da Flutter
 ├── app_src/             # SORGENTE CANONICA del Dart (lib/, test/, assets/)
 ├── scripts/
-│   └── build-apk.ps1    # copia app_src/ in app/, esegue i test e builda l'APK
+│   ├── build-apk.ps1          # copia app_src/ in app/, esegue i test e builda l'APK
+│   └── generate_relazione.py  # genera RELAZIONE.html e RELAZIONE.pdf (2 pagine)
 ├── supabase/
 │   ├── schema.sql       # Tabella + Row Level Security da eseguire in Supabase
 │   └── functions/
@@ -31,7 +32,8 @@ Scarica l'APK dalla [sezione Releases](../../releases/latest) (~76 MB) e install
 ├── docs/                # Diagrammi per la relazione
 ├── screenshots/         # Screenshot reali (ai_solution, livelli, impara, profilo)
 ├── .env.example
-└── RELAZIONE.md
+├── RELAZIONE.md
+└── RELAZIONE.pdf        # Relazione sintetica in 2 pagine A4
 ```
 
 ## Prerequisiti
@@ -177,4 +179,4 @@ flutter test
 
 - `GEMINI_API_KEY` va solo in `.env`; `.gitignore` esclude il file.
 - Modello predefinito: `gemini-3.6-flash`, con fallback automatico a `gemini-3.5-flash-lite` e `gemini-3.8-flash` se uno è sovraccarico o disattivato (configurabile con `GEMINI_MODEL`).
-- La relazione tecnica è in `RELAZIONE.md`; gli screenshot reali sono in `screenshots/` (`ai_solution.jpeg`, `livelli.jpeg`, `impara.jpeg`, `profilo.jpeg`).
+- La relazione tecnica sintetica in 2 pagine è `RELAZIONE.pdf` (versione Markdown: `RELAZIONE.md`); si rigenera con `python scripts/generate_relazione.py`. Gli screenshot reali sono in `screenshots/` (`ai_solution.jpeg`, `livelli.jpeg`, `impara.jpeg`, `profilo.jpeg`).

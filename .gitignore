@@ -21,6 +21,9 @@ supabase/.temp/
 # APK generata: pubblicarla come GitHub Release, non nel repository
 AI-Sudoku-Vision-Tutor.apk
 
+# HTML generato dalla relazione (contiene gli screenshot in base64)
+RELAZIONE.html
+
 # Estrazione locale della traccia
 pdf_text.txt
 
